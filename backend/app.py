@@ -582,26 +582,77 @@ def _generate_rpg_background_to_webp(out_webp_path: str, width: int = 1280, heig
     def _run_cmd(cmd_args):
         return subprocess.run(cmd_args, capture_output=True, text=True, env=env, timeout=240)
 
-    proc = _run_cmd(cmd)
-    if proc.returncode != 0 and mode == "fast":
-        err_text = (proc.stderr or proc.stdout or "").strip().lower()
-        if ("not found" in err_text and "models/" in err_text) or ("model_not_available" in err_text):
-            # fast 模型不可用时自动回退到稳定模型
-            fallback_model = configured_model or "gemini-3.1-flash-image-preview"
-            cmd_fallback = cmd[:]
-            if "--model" in cmd_fallback:
-                idx = cmd_fallback.index("--model")
-                if idx + 1 < len(cmd_fallback):
-                    cmd_fallback[idx + 1] = fallback_model
-            env["GEMINI_MODEL"] = fallback_model
-            proc = _run_cmd(cmd_fallback)
+    def _is_model_unavailable_error(text: str) -> bool:
+        low = (text or "").strip().lower()
+        return (
+            ("not found" in low and "models/" in low)
+            or ("model_not_available" in low)
+            or ("model is not available" in low)
+            or ("configured model is not available" in low)
+            or ("this model is not available" in low)
+        )
 
-    if proc.returncode != 0:
+    def _with_model(cmd_args, model_name: str):
+        m = cmd_args[:]
+        if "--model" in m:
+            idx = m.index("--model")
+            if idx + 1 < len(m):
+                m[idx + 1] = model_name
+        else:
+            m.extend(["--model", model_name])
+        return m
+
+    # 模型多级回退（兼容不同 key/channel 可用性差异）
+    if mode == "fast":
+        model_candidates = [
+            "nanobanana-2",
+            configured_model,
+            "nanobanana-pro",
+            "gemini-2.5-flash-image-preview",
+            "gemini-3.1-flash-image-preview",
+        ]
+    else:
+        model_candidates = [
+            configured_model,
+            "nanobanana-pro",
+            "nanobanana-2",
+            "gemini-2.5-flash-image-preview",
+            "gemini-3.1-flash-image-preview",
+        ]
+    # 去重并清理空项
+    model_candidates = [m for i, m in enumerate(model_candidates) if m and m not in model_candidates[:i]]
+
+    proc = None
+    last_err_text = ""
+    model_unavailable_count = 0
+
+    for mname in model_candidates:
+        env["GEMINI_MODEL"] = mname
+        try_cmd = _with_model(cmd, mname)
+        proc = _run_cmd(try_cmd)
+        if proc.returncode == 0:
+            break
+
         err_text = (proc.stderr or proc.stdout or "").strip()
+        last_err_text = err_text
+
+        # key 失效/泄漏：立即终止，不继续尝试
         low = err_text.lower()
         if "your api key was reported as leaked" in low or "permission_denied" in low:
             raise RuntimeError("API_KEY_REVOKED_OR_LEAKED")
-        if "not found" in low and "models/" in low:
+
+        if _is_model_unavailable_error(err_text):
+            model_unavailable_count += 1
+            continue
+
+        # 非模型不可用错误，直接返回真实错误
+        raise RuntimeError(f"生图失败: {err_text}")
+
+    if proc is None or proc.returncode != 0:
+        if model_unavailable_count >= len(model_candidates):
+            raise RuntimeError("MODEL_NOT_AVAILABLE")
+        err_text = (last_err_text or "").strip()
+        if _is_model_unavailable_error(err_text):
             raise RuntimeError("MODEL_NOT_AVAILABLE")
         raise RuntimeError(f"生图失败: {err_text}")
 
