@@ -14,6 +14,52 @@
 
 ---
 
+---
+
+## 📣 本 Fork 变更记录
+
+> 此版本基于 [ringhyacinth/Star-Office-UI](https://github.com/ringhyacinth/Star-Office-UI) 魔改，由 deepvoce 维护。
+
+### 🆕 新增功能
+
+| 功能 | 说明 |
+|------|------|
+| **自动状态检测** | 后端轮询 OpenClaw session 文件，实时识别 agent 状态（待命/写作/会议/报错等），无需手动切换 |
+| **新状态类型** | 新增 `meeting`（会议中）、`break`（休息中）等状态，状态机更完整 |
+| **状态同步文件** | 生成 `office-agent-state.json`，供其他程序读取 agent 当前状态 |
+
+### 🐛 Bug 修复
+
+| 问题 | 修复 |
+|------|------|
+| 花朵动画帧尺寸错误 | `flowers-bloom-v2` 精灵图不是 4x4 网格布局，修正帧提取逻辑 |
+| 花朵探测加载时序 | 加载后增加 `setTimeout` 确保 Phaser 内部纹理准备就绪再探测 |
+| 访客动画帧尺寸错误 | 访客动画精灵图非 4x1 布局，修正帧尺寸探测逻辑 |
+
+### ⚙️ 配置变更
+
+- 状态轮询间隔：3 秒 → 5 秒（节省资源）
+- 后端 `app.py` 增加 `get_session_latest_message()` 检测 session 最后消息角色
+- 新增 `meeting`、`break` 状态的区域定义和占位位置
+
+### 📁 文件变更
+
+```
+backend/app.py          — 自动状态检测、新状态定义
+frontend/game.js        — 花朵帧尺寸修复
+frontend/index.html     — 花朵探测时序修复
+```
+
+### 🔧 同步上游更新
+
+```bash
+cd Star-Office-UI
+git fetch upstream
+git merge upstream/master
+# 解决冲突后 push
+git push origin master
+```
+
 ## ✨ 快速体验
 
 ### 方式一：让龙虾帮你部署（推荐给 OpenClaw 用户）
