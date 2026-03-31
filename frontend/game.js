@@ -319,7 +319,7 @@ function preload() {
 
   // 新办公桌：强制 PNG（透明）
   this.load.image('desk_v2', '/static/desk-v2.png');
-  this.load.spritesheet('flowers', '/static/flowers-spritesheet' + (supportsWebP ? '.webp' : '.png'), { frameWidth: 65, frameHeight: 65 });
+  this.load.spritesheet('flowers', '/static/flowers-bloom-v2' + (supportsWebP ? '.webp' : '.png'), { frameWidth: 128, frameHeight: 128 });
 }
 
 function create() {

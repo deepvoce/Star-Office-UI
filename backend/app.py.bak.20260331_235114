@@ -12,7 +12,6 @@ import shutil
 import subprocess
 import tempfile
 import threading
-import time
 from pathlib import Path
 from security_utils import is_production_mode, is_strong_secret, is_strong_drawer_pass
 from memo_utils import get_yesterday_date_str, sanitize_content, extract_memo_from_file
@@ -70,125 +69,16 @@ ASSET_DEFAULTS_FILE = os.path.join(ROOT_DIR, "asset-defaults.json")
 RUNTIME_CONFIG_FILE = os.path.join(ROOT_DIR, "runtime-config.json")
 
 # Canonical agent states: single source of truth for validation and mapping
-VALID_AGENT_STATES = frozenset({"idle", "receiving", "replying", "writing", "researching", "executing", "syncing", "error"})
-WORKING_STATES = frozenset({"writing", "researching", "executing", "replying"})  # subset used for auto-idle TTL
+VALID_AGENT_STATES = frozenset({"idle", "writing", "researching", "executing", "syncing", "error"})
+WORKING_STATES = frozenset({"writing", "researching", "executing"})  # subset used for auto-idle TTL
 STATE_TO_AREA_MAP = {
     "idle": "breakroom",
-    "receiving": "breakroom",
-    "replying": "writing",
     "writing": "writing",
     "researching": "writing",
     "executing": "writing",
     "syncing": "writing",
     "error": "error",
 }
-
-# ─── OpenClaw Session Auto-Detection ───
-OPENCLAW_SESSION_DIR = os.path.join(os.path.expanduser("~"), ".openclaw", "agents", "main", "sessions")
-OPENCLAW_SESSIONS_JSON = os.path.join(OPENCLAW_SESSION_DIR, "sessions.json")
-_auto_detect_enabled = False
-_auto_detect_thread = None
-
-def _find_wechat_session_file():
-    """Find the WeChat session JSONL file from sessions.json"""
-    try:
-        if not os.path.exists(OPENCLAW_SESSIONS_JSON):
-            return None
-        with open(OPENCLAW_SESSIONS_JSON, "r") as f:
-            sessions = json.load(f)
-        for key, val in sessions.items():
-            if "openclaw-weixin" in key:
-                return val.get("sessionFile")
-    except Exception:
-        pass
-    return None
-
-def _detect_openclaw_state():
-    """Read the last message from OpenClaw session file to detect agent state"""
-    session_file = _find_wechat_session_file()
-    if not session_file or not os.path.exists(session_file):
-        return None
-
-    try:
-        # Check file modification time - if recently updated, agent is working
-        mtime = os.path.getmtime(session_file)
-        now = time.time()
-
-        # Read last 20 lines to find the last user/assistant message
-        lines = []
-        try:
-            with open(session_file, "r") as f:
-                all_lines = f.readlines()
-            lines = [l.strip() for l in all_lines[-20:] if l.strip()]
-        except Exception as e:
-            print(f"[auto-detect] Read error: {e}")
-            return None
-
-        # Parse from last to find the most recent user/assistant message
-        last_role = None
-        for line in reversed(lines):
-            try:
-                d = json.loads(line)
-                msg = d.get("message", {})
-                role = msg.get("role")
-                if role in ("user", "assistant"):
-                    last_role = role
-                    break
-            except (json.JSONDecodeError, AttributeError):
-                continue
-
-        # Determine state
-        if last_role == "user":
-            # Last message is from user → agent is idle, waiting
-            return "idle"
-        elif last_role == "assistant":
-            # Last message from assistant - check if still generating
-            if now - mtime < 5:  # File updated within 5 seconds → still working
-                return "replying"
-            else:
-                return "idle"
-
-        return None
-    except Exception as e:
-        print(f"[auto-detect] Error: {e}")
-        return None
-
-def _auto_detect_loop():
-    """Background loop that polls OpenClaw session state"""
-    global _auto_detect_enabled
-    while _auto_detect_enabled:
-        try:
-            detected = _detect_openclaw_state()
-            if detected:
-                state = load_state()
-                # Only auto-update if state is working/replying/idle (not manual overrides)
-                current = state.get("state", "idle")
-                # Don't override manual states like error, syncing
-                if current in ("idle", "replying", "receiving") or detected != "idle":
-                    if current != detected:
-                        state["state"] = detected
-                        state["detail"] = {
-                            "replying": "和你聊天中",
-                            "idle": "待命中",
-                            "receiving": "收到消息",
-                        }.get(detected, detected)
-                        state["updated_at"] = datetime.now().isoformat()
-                        save_state(state)
-        except Exception:
-            pass
-        time.sleep(5)  # Poll every 5 seconds
-
-def start_auto_detect():
-    """Start the auto-detection background thread"""
-    global _auto_detect_enabled, _auto_detect_thread
-    if _auto_detect_enabled:
-        return
-    _auto_detect_enabled = True
-    _auto_detect_thread = threading.Thread(target=_auto_detect_loop, daemon=True)
-    _auto_detect_thread.start()
-    print("[auto-detect] Started OpenClaw session auto-detection")
-
-# ─── OpenClaw Session Auto-Detection ───
 
 
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="/static")
@@ -2208,9 +2098,6 @@ if __name__ == "__main__":
         else:
             print("Security hardening: OK")
     print("=" * 50)
-
-    # Start OpenClaw session auto-detection
-    start_auto_detect()
 
     app.run(host="0.0.0.0", port=backend_port, debug=False)
 
